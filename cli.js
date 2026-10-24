@@ -1,7 +1,10 @@
-import {input, select} from '@inquirer/prompts';
-import { stat } from 'node:fs/promises';
+import {confirm, input, select, Separator} from '@inquirer/prompts';
+import { stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { PageSizes, StandardFonts } from 'pdf-lib';
 import { createPrompt, isEnterKey, makeTheme, useEffect, useKeypress, usePrefix, useState } from '@inquirer/core';
 import {formatFileName, PaperSize} from './common.js';
+import {generatePDF} from "./generator.js";
 
 const displayValue = createPrompt((config, done) => {
     const theme = makeTheme({});
@@ -28,11 +31,23 @@ async function main() {
             throw error;
         }
     });
-    
-    const paperDimensions = await getPaperDimensions();
-    const labelDimensions = await getLabelDimensions(paperDimensions);
+
+    const pageSize = await getPaperDimensions();
+    const labelSize = await getLabelDimensions(pageSize);
+
     const templateName = await getTemplateName();
     const dir = await getDir();
+
+
+    const config = {
+        pageSize: pageSize,
+        labelSize: labelSize,
+        font: await getFont(),
+    }
+
+    const pdf = await generatePDF(config);
+
+    await writeFile(join(dir, formatFileName(templateName)), pdf);
 }
 
 
@@ -42,45 +57,40 @@ const dimensionOptions = {
     patternError: 'Enter a number > 0',
 };
 
+async function getFont() {
+    return select({
+        message: 'Select a font:',
+        choices: Object.values(StandardFonts).map((font) => ({
+            name: font,
+            value: font,
+        })),
+        loop: false,
+    });
+}
+
 async function getPaperDimensions(){
+    const commonSizes = ['Letter', 'A4', 'Legal', 'A5', 'Tabloid', 'A3'];
+    const sizes = [
+        ...commonSizes,
+        ...Object.keys(PageSizes).filter((size) => !commonSizes.includes(size)),
+    ];
     const paperSize = await select({
-        message: 'Select a paper size:',
+        message: 'Select a paper size (or select custom):',
         default: 'Letter',
+        pageSize: 10,
+        loop: true ,
         choices: [
-            {
-                name: 'Letter',
-                value: PaperSize.LETTER,
-                description: '215.9 × 279.4 mm (8.5 × 11 in)',
-            },
-            {
-                name: 'A4',
-                value: PaperSize.A4,
-                description: '210 × 297 mm (8.27 × 11.69 in)',
-            },
-            {
-                name: 'Legal',
-                value: PaperSize.LEGAL,
-                description: '215.9 × 355.6 mm (8.5 × 14 in)',
-            },
-            {
-                name: 'A5',
-                value: PaperSize.A5,
-                description: '148 × 210 mm (5.83 × 8.27 in)',
-            },
-            {
-                name: 'Tabloid',
-                value: PaperSize.TABLOID,
-                description: '279.4 × 431.8 mm (11 × 17 in)',
-            },
-            {
-                name: 'A3',
-                value: PaperSize.A3,
-                description: '297 × 420 mm (11.69 × 16.54 in)',
-            },
+            ...sizes.map((size) => ({
+                name: size,
+                value: size,
+                description: `${(PageSizes[size][0] / 72).toFixed(2)} × ${(PageSizes[size][1] / 72).toFixed(2)} in`,
+            })),
+            new Separator(),
             {
                 name: 'Custom Size',
                 value: PaperSize.CUSTOM
-            }
+            },
+            new Separator(),
         ],
     });
 
@@ -91,26 +101,17 @@ async function getPaperDimensions(){
         w = Number(await input({
             ...dimensionOptions,
             message: wMessage,
-        }));
+        })) * 72;
 
         h = Number(await input({
             ...dimensionOptions,
             message: hMessage,
-        }));
+        })) * 72;
     }
     else {
-        const dimensions = {
-            [PaperSize.LETTER]: [8.5, 11],
-            [PaperSize.A4]: [8.27, 11.69],
-            [PaperSize.LEGAL]: [8.5, 14],
-            [PaperSize.A5]: [5.83, 8.27],
-            [PaperSize.TABLOID]: [11, 17],
-            [PaperSize.A3]: [11.69, 16.54],
-        };
-
-        [w, h] = dimensions[paperSize];
-        await displayValue({ message: wMessage, value: w });
-        await displayValue({ message: hMessage, value: h });
+        [w, h] = PageSizes[paperSize];
+        await displayValue({ message: wMessage, value: Number((w / 72).toFixed(2)) });
+        await displayValue({ message: hMessage, value: Number((h / 72).toFixed(2)) });
     }
     return [w, h];
 }
@@ -122,14 +123,14 @@ async function getLabelDimensions([paperWidth, paperHeight]){
     w = Number(await input({
         ...dimensionOptions,
         message: wMessage,
-        validate: (value) => Number(value) <= paperWidth || `Label width must be at most ${paperWidth} in`,
-    }));
+        validate: (value) => Number(value) * 72 <= paperWidth || `Label width must be at most ${paperWidth / 72} in`,
+    })) * 72;
 
     h = Number(await input({
         ...dimensionOptions,
         message: hMessage,
-        validate: (value) => Number(value) <= paperHeight || `Label height must be at most ${paperHeight} in`,
-    }));
+        validate: (value) => Number(value) * 72 <= paperHeight || `Label height must be at most ${paperHeight / 72} in`,
+    })) * 72;
 
     return  [w,h]
 }
