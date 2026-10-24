@@ -32,17 +32,29 @@ async function main() {
         }
     });
 
-    const pageSize = await getPaperDimensions();
+    const { pageSize, pageSizeName } = await getPaperDimensions();
     const labelSize = await getLabelDimensions(pageSize);
+    const font = await getFont();
+    const multiline = await select({
+        message: 'Select label text mode:',
+        default: false,
+        loop: false,
+        choices: [
+            { name: 'Single line', value: false },
+            { name: 'Multiline (wrapping)', value: true },
+        ],
+    });
 
     const templateName = await getTemplateName();
     const dir = await getDir();
 
-
     const config = {
         pageSize: pageSize,
+        pageSizeName: pageSizeName,
         labelSize: labelSize,
-        font: await getFont(),
+        font: font,
+        multiline: multiline,
+        name: templateName,
     }
 
     const pdf = await generatePDF(config);
@@ -113,7 +125,10 @@ async function getPaperDimensions(){
         await displayValue({ message: wMessage, value: Number((w / 72).toFixed(2)) });
         await displayValue({ message: hMessage, value: Number((h / 72).toFixed(2)) });
     }
-    return [w, h];
+    return {
+        pageSize: [w, h],
+        pageSizeName: paperSize === PaperSize.CUSTOM ? undefined : paperSize,
+    };
 }
 
 async function getLabelDimensions([paperWidth, paperHeight]){
@@ -132,7 +147,7 @@ async function getLabelDimensions([paperWidth, paperHeight]){
         validate: (value) => Number(value) * 72 <= paperHeight || `Label height must be at most ${paperHeight / 72} in`,
     })) * 72;
 
-    return  [w,h]
+    return  {width: w, height: h};
 }
 
 const templateNameInput = createPrompt((config, done) => {
